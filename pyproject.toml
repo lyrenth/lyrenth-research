@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lyrenth-research"
+version = "0.1.0"
+description = "A research agent that reads its sources: give it a question and URLs, get an answer with numbered citations."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Lyrenth" }]
+keywords = ["research", "agent", "citations", "rag", "llm", "web", "lyrenth", "aidocument"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Environment :: Console",
+]
+dependencies = ["lyrenth>=0.1.1"]
+
+[project.scripts]
+lyrenth-research = "lyrenth_research.cli:main"
+
+[project.urls]
+Homepage = "https://lyrenth.com"
+Documentation = "https://lyrenth.com/docs/quickstart"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lyrenth_research"]
