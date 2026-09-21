@@ -46,7 +46,10 @@ def _report(gathered, out=None) -> None:
     for s in gathered.skipped:
         print(f"skipped  {s.url}: {s.reason}", file=out)
     for i, s in enumerate(gathered.sources, 1):
-        print(f"read [{i}] {s.title}  {s.tokens:,} tokens  {s.url}", file=out)
+        # A page can carry no title at all (an RFC served as one <pre>
+        # block is the example), and an empty one left a hole in the line.
+        label = f"{s.title}  " if s.title else ""
+        print(f"read [{i}] {label}{s.tokens:,} tokens  {s.url}", file=out)
     raw = gathered.raw_html_tokens
     line = f"context  {gathered.tokens:,} tokens from {len(gathered.sources)} sources"
     if raw:
@@ -100,7 +103,8 @@ def main(argv=None) -> int:
     print("Sources")
     for i, s in enumerate(result.sources, 1):
         mark = "" if i in result.cited else "  (not cited)"
-        print(f"  [{i}] {s.title}  {s.url}{mark}")
+        label = f"{s.title}  " if s.title else ""
+        print(f"  [{i}] {label}{s.url}{mark}")
     if result.unknown_citations:
         nums = ", ".join(f"[{n}]" for n in result.unknown_citations)
         print(f"\nwarning: the answer cites {nums}, which is not one of the sources above", file=sys.stderr)

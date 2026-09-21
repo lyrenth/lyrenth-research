@@ -49,7 +49,8 @@ def doc(canonical, title, text, tokens, raw=0, fetched="2026-09-19T12:00:00Z"):
 
 
 class FakeClient:
-    """Answers read_batch from a dict of url -> AIDocument or error string."""
+    """Answers read_batch from a dict of url -> AIDocument, error string, or
+    an (error code, explanation) pair for a failure that carries both."""
 
     def __init__(self, pages):
         self.pages = pages
@@ -60,7 +61,9 @@ class FakeClient:
         out = []
         for u in urls:
             v = self.pages.get(u, "upstream_not_found")
-            if isinstance(v, str):
+            if isinstance(v, tuple):
+                out.append(BatchResult(url=u, ok=False, error=v[0], message=v[1]))
+            elif isinstance(v, str):
                 out.append(BatchResult(url=u, ok=False, error=v))
             else:
                 out.append(BatchResult(url=u, ok=True, document=v))
@@ -72,6 +75,11 @@ A_MOBILE = "https://m.example.com/a"
 B = "https://example.com/b"
 C = "https://example.com/c"
 MISSING = "https://example.com/missing"
+FORBIDDEN = "https://example.com/forbidden"
+FORBIDDEN_MESSAGE = (
+    "example.com returned 403 to our crawler. This is usually bot protection, "
+    "geo / consent gating, or a CDN rule, not necessarily a login wall."
+)
 
 
 def pages():
@@ -86,21 +94,62 @@ def pages():
 # ---------------------------------------------------------------- gather
 
 def test_gather_every_branch():
+    # A is 3,000 tokens and takes only what it needs. The 27,000 left over is
+    # split between B and C, which are both above their share, so all three
+    # pages are carried and the two long ones are marked trimmed.
     g = gather([A, B, C, MISSING, A_MOBILE, A], client=FakeClient(pages()), token_budget=30000)
-    assert [s.url for s in g.sources] == [A, B], g.sources
-    assert g.tokens == 23000
-    assert g.raw_html_tokens == 105000
+    assert [s.url for s in g.sources] == [A, B, C], g.sources
+    assert [s.tokens for s in g.sources] == [3000, 13500, 13500]
+    assert [s.trimmed for s in g.sources] == [False, True, True]
+    assert g.tokens == 30000
+    assert g.raw_html_tokens == 145000
     reasons = {s.url: s.reason for s in g.skipped}
-    assert "over budget" in reasons[C], reasons
     assert reasons[MISSING] == "upstream_not_found"
     assert reasons[A_MOBILE] == f"duplicate of {A}"
     # The exact same URL given twice is read once, not reported as skipped.
-    assert len(g.skipped) == 3
+    assert len(g.skipped) == 2
 
 
-def test_gather_prefers_earlier_urls_when_budget_is_tight():
-    g = gather([C, A, B], client=FakeClient(pages()), token_budget=20000)
-    assert [s.url for s in g.sources] == [C, A]
+def test_gather_reports_the_explanation_when_the_item_carries_one():
+    # The code alone ("upstream_forbidden") tells a reader nothing about what
+    # to do next, so the sentence wins when the API sends one.
+    g = gather([FORBIDDEN], client=FakeClient({FORBIDDEN: ("upstream_forbidden", FORBIDDEN_MESSAGE)}))
+    assert g.sources == []
+    assert g.skipped[0].reason == FORBIDDEN_MESSAGE, g.skipped
+
+
+def test_two_long_pages_both_make_it_in():
+    # Giving the first page whatever was left meant a second long page was
+    # dropped for want of room, and a question about two subjects came back
+    # answered from one of them. Both now get half the budget.
+    first = doc(A, "A", "alpha " * 20000, 40000)
+    second = doc(B, "B", "beta " * 20000, 35000)
+    g = gather([A, B], client=FakeClient({A: first, B: second}), token_budget=20000)
+    assert [s.url for s in g.sources] == [A, B], g.skipped
+    assert [s.tokens for s in g.sources] == [10000, 10000]
+    assert all(s.trimmed for s in g.sources)
+    assert g.skipped == []
+
+
+def test_a_trimmed_page_says_so_in_the_context():
+    # A model reading a partial page as if it were whole would cite it for
+    # what is not there, so the note travels with the source.
+    from lyrenth_research.answer import build_context
+
+    long_doc = doc(A, "Long A", "x " * 20000, 40000)
+    g = gather([A], client=FakeClient({A: long_doc}), token_budget=10000)
+    assert g.sources[0].trimmed is True
+    assert "longer than the budget" in build_context(g.sources)
+
+
+def test_order_decides_who_is_carried_when_the_budget_is_small():
+    # Five pages against a budget with room for two: the first two are read
+    # and the three dropped say why.
+    urls = [f"https://example.com/p{i}" for i in range(5)]
+    small = {u: doc(u, u, "text " * 100, 9000) for u in urls}
+    g = gather(urls, client=FakeClient(small), token_budget=4000)
+    assert [s.url for s in g.sources] == urls[:2]
+    assert [s.reason for s in g.skipped] == ["no room left in the 4,000 token budget"] * 3
 
 
 def test_gather_batches_by_twenty():
@@ -179,6 +228,49 @@ def _serve():
     srv = HTTPServer(("127.0.0.1", 0), _Model)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, f"http://127.0.0.1:{srv.server_address[1]}/v1"
+
+
+class _FussyModel(BaseHTTPRequestHandler):
+    """An endpoint that refuses the temperature field, as some real ones do."""
+
+    received = []
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        _FussyModel.received.append(body)
+        if "temperature" in body:
+            out = json.dumps({"error": {"message": "`temperature` is deprecated for this model."}}).encode()
+            self.send_response(400)
+        else:
+            out = json.dumps(
+                {"choices": [{"message": {"role": "assistant", "content": "Alpha [1]."}}]}
+            ).encode()
+            self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def log_message(self, *a):
+        pass
+
+
+def test_an_endpoint_that_refuses_temperature_still_answers():
+    # "Anything that speaks the OpenAI-compatible protocol works" is the
+    # promise in the README, and one of the large providers answers 400 to
+    # the temperature field. Before this, that was a failed run.
+    srv = HTTPServer(("127.0.0.1", 0), _FussyModel)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/v1"
+    try:
+        _FussyModel.received.clear()
+        r = answer("What do they say?", [Source(A, "Page A", "Alpha.")], base_url=url, model="fussy")
+        assert r.text == "Alpha [1]."
+        assert len(_FussyModel.received) == 2
+        assert "temperature" in _FussyModel.received[0]
+        assert "temperature" not in _FussyModel.received[1]
+    finally:
+        srv.shutdown()
 
 
 def test_answer_calls_an_openai_compatible_endpoint():

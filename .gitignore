@@ -1,7 +1,9 @@
-.venv/
 __pycache__/
-*.egg-info/
-dist/
+*.pyc
 build/
+dist/
+*.egg-info/
+.venv/
+.pytest_cache/
 .env
 context.md

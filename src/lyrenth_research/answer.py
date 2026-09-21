@@ -49,6 +49,10 @@ def build_context(sources: List[Source]) -> str:
         header = f"[{i}] {s.title or s.url}\nURL: {s.url}"
         if s.fetched_at:
             header += f"\nRead: {s.fetched_at}"
+        if s.trimmed:
+            # Said here, not only in a summary line, so a model reading this
+            # block alone still knows the page continues past what it has.
+            header += "\nNote: this page was longer than the budget. Only its opening is below."
         parts.append(f"{header}\n\n{s.text}")
     return "\n\n---\n\n".join(parts)
 
@@ -87,11 +91,31 @@ def call_model(
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    body = json.dumps({"model": model, "messages": messages, "temperature": 0}).encode("utf-8")
-    req = urllib.request.Request(f"{base_url}/chat/completions", data=body, headers=headers, method="POST")
-    try:
+
+    def post(fields: dict):
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=json.dumps(fields).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8"))
+
+    # Temperature 0 is what an agent that cites its sources wants: the same
+    # pages should give the same answer. Some OpenAI-compatible endpoints
+    # refuse the field outright, and the promise on the tin is that this runs
+    # against any of them, so a refusal of the field is answered by sending
+    # the request again without it rather than by failing the run.
+    try:
+        try:
+            payload = post({"model": model, "messages": messages, "temperature": 0})
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:300]
+            if e.code == 400 and "temperature" in detail.lower():
+                payload = post({"model": model, "messages": messages})
+            else:
+                raise ModelError(f"model endpoint returned HTTP {e.code}: {detail}") from None
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:300]
         raise ModelError(f"model endpoint returned HTTP {e.code}: {detail}") from None

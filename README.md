@@ -41,15 +41,17 @@ This agent does five things on purpose:
    read time, and all three go into the prompt.
 3. **Reads each document once.** A mobile copy, a tracking parameter or an
    old redirect resolves to the same canonical URL and is dropped.
-4. **Stays inside a budget.** Sources are added in the order you give them
-   until the next one would exceed the budget. Put the ones you trust most
-   first.
+4. **Shares the budget between the pages.** Every page gets an equal share
+   of the token budget, a short page hands its leftover to the long ones,
+   and a page that is still too long is trimmed and marked rather than
+   dropped. Order still decides who is carried when there are more pages
+   than the budget can hold, so put the ones you trust most first.
 5. **Fails visibly.** Every page that was skipped is listed with the reason,
    and a citation to a source number that does not exist is flagged.
 
 ## A real run
 
-Reading step only (`--sources-only`), against the live API on September 19,
+Reading step only (`--sources-only`), against the live API on 21 September
 2026, unedited. The progress report goes to stderr, the numbered context to
 stdout (here, `context.md`).
 
@@ -61,33 +63,36 @@ $ lyrenth-research "What is the difference between a web crawler and web indexin
     https://en.wikipedia.org/wiki/No_such_page_for_this_example \
     https://en.m.wikipedia.org/wiki/Web_indexing \
     --sources-only > context.md
-skipped  https://en.wikipedia.org/wiki/Robots.txt: over budget (16,719 tokens would exceed 30,000)
-skipped  https://en.wikipedia.org/wiki/No_such_page_for_this_example: origin returned 404
+skipped  https://en.wikipedia.org/wiki/No_such_page_for_this_example: en.wikipedia.org does not have a page at this URL (404). Check the URL for typos, or try the site's homepage to see if the path has changed.
 skipped  https://en.m.wikipedia.org/wiki/Web_indexing: duplicate of https://en.wikipedia.org/wiki/Web_indexing
 read [1] Web indexing - Wikipedia  3,119 tokens  https://en.wikipedia.org/wiki/Web_indexing
-read [2] Web crawler - Wikipedia  22,410 tokens  https://en.wikipedia.org/wiki/Web_crawler
-context  25,529 tokens from 2 sources (raw HTML would be 111,672)
+read [2] Web crawler - Wikipedia  13,440 tokens  https://en.wikipedia.org/wiki/Web_crawler
+read [3] robots.txt - Wikipedia  13,440 tokens  https://en.wikipedia.org/wiki/Robots.txt
+context  29,999 tokens from 3 sources (raw HTML would be 193,244)
 ```
 
-The same question with a model configured, run on September 19, 2026 with
-a hosted model through its OpenAI-compatible endpoint. The reading report is
-identical; this is the end of the answer and the source list, shortened for
-length and otherwise as printed:
+The same question with a model configured, run the same day through an
+OpenAI-compatible endpoint. The reading report is identical; this is the
+answer, shortened for length and otherwise as printed:
 
 ```text
-**Key Difference:**
-- The web crawler is the tool or agent that collects web content by navigating the web.
-- Web indexing is the process that takes the content gathered by the crawler and organizes it into a searchable index.
+## Web Crawler vs. Web Indexing
 
-In summary:
-**Web crawling** is about collecting web pages, while **web indexing** is about organizing and making sense of the collected data for efficient search and retrieval[1][2].
+**Web crawler** is the software/tool that does the *fetching*. A web crawler (also called a spider or spiderbot) is an internet bot that systematically browses the World Wide Web, typically operated by search engines [2]. It starts with a list of seed URLs, visits them, identifies hyperlinks on the retrieved pages, and adds those to a queue (the "crawl frontier") to visit recursively [2]. In short, its job is to discover and download web pages so they can be processed later [2].
+
+...
+
+### How they relate
+- Crawlers **copy pages** for processing by a search engine, and the search engine then **indexes** those downloaded pages so users can search more efficiently [2].
+- In effect: crawling = discovering and downloading content; indexing = organizing that content (e.g., via keywords/metadata) into a structure that supports search queries [1][2].
 
 Sources
   [1] Web indexing - Wikipedia  https://en.wikipedia.org/wiki/Web_indexing
   [2] Web crawler - Wikipedia  https://en.wikipedia.org/wiki/Web_crawler
+  [3] robots.txt - Wikipedia  https://en.wikipedia.org/wiki/Robots.txt
 ```
 
-Every claim carries a source number, both sources were cited, and neither
+Every claim carries a source number, all three sources were cited, and none
 is marked `(not cited)`.
 
 ## Two keys, and why
