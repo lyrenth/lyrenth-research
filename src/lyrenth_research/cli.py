@@ -58,7 +58,10 @@ def _report(gathered, out=None) -> None:
 
 
 def main(argv=None) -> int:
-    args = _parser().parse_args(argv)
+    # Intermixed, so an option may sit before, between or after the URLs.
+    # Plain parse_args refused `"question" --budget N URL URL` on Python
+    # 3.9, and an option between two URLs on every version (2026-09-24).
+    args = _parser().parse_intermixed_args(argv)
     urls = _urls(args)
     if not urls:
         print("give at least one URL, or a file of URLs with --file", file=sys.stderr)

@@ -320,6 +320,24 @@ def test_cli_needs_a_url():
         assert cli.main(["question only"]) == 2
 
 
+def test_options_may_sit_before_or_between_the_urls():
+    # On Python 3.9, the oldest this package supports, a plain parse_args
+    # refused any option before the URLs, and on every version it refused an
+    # option placed between two URLs, with "unrecognized arguments".
+    real = cli.Lyrenth
+    cli.Lyrenth = lambda: FakeClient(pages())
+    try:
+        for argv in (["What?", "--budget", "30000", A, B, "--sources-only"],
+                     ["What?", A, "--sources-only", B]):
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                code = cli.main(argv + ["--json"])
+            assert code == 0, argv
+            assert [s["url"] for s in json.loads(out.getvalue())["sources"]] == [A, B], argv
+    finally:
+        cli.Lyrenth = real
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:

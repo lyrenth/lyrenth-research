@@ -11,7 +11,7 @@ https://lyrenth.com/signup). The answer comes from any OpenAI-compatible
 model endpoint you configure with LLM_BASE_URL and LLM_MODEL.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from .answer import Answer, ModelError, answer, build_context, check_citations  # noqa: E402
 from .sources import Gathered, Skipped, Source, gather  # noqa: E402

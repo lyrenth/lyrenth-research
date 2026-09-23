@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lyrenth-research"
-version = "0.2.0"
+version = "0.2.1"
 description = "A research agent that reads its sources: give it a question and URLs, get an answer with numbered citations."
 readme = "README.md"
 requires-python = ">=3.9"
